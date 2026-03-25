@@ -1,5 +1,5 @@
 // Import necessary React hooks and libraries
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx'; // Library for reading Excel files
 import { Document, Packer, Paragraph, Table, TableCell, TableRow, TextRun } from 'docx'; // Library for creating Word documents
 import { saveAs } from 'file-saver'; // Library for downloading files
@@ -14,6 +14,71 @@ function App() {
   const [transpose, setTranspose] = useState(true); // Whether to transpose rows/columns in output
   const [splitColumns, setSplitColumns] = useState(false); // Whether to split columns into separate documents
   const [showPreview, setShowPreview] = useState(true); // Whether to show the document preview
+  const [selectedItem, setSelectedItem] = useState(''); // Index of selected item column for analysis
+  const [itemAnalysis, setItemAnalysis] = useState(null); // Results of Y/N analysis for selected item
+
+  // Reset item analysis whenever the active file changes
+  useEffect(() => {
+    setSelectedItem('');
+    setItemAnalysis(null);
+  }, [selectedFileIndex]);
+
+  /**
+   * Returns all column headers from the current file's first row
+   */
+  const getItemColumns = () => {
+    if (!files || files.length === 0 || !files[selectedFileIndex]) return [];
+    const data = files[selectedFileIndex].data;
+    if (!data || data.length === 0) return [];
+    return (data[0] || []).map((header, idx) => ({
+      header: String(header !== undefined && header !== null ? header : `Column ${idx + 1}`),
+      colIndex: idx,
+    }));
+  };
+
+  /**
+   * Scans the selected column for Y/N values across all data rows.
+   * Flags a conflict if both Y and N are present.
+   * @param {number} colIndex - Column index to analyse
+   */
+  const analyzeItem = (colIndex) => {
+    const idx = parseInt(colIndex, 10);
+    const data = files[selectedFileIndex].data;
+    const yAddresses = [];
+    const nAddresses = [];
+
+    // Start from row 1 to skip the header row
+    for (let row = 1; row < data.length; row++) {
+      const address = data[row][0] !== undefined ? String(data[row][0]) : `Row ${row}`;
+      const cellValue = data[row][idx] !== undefined
+        ? String(data[row][idx]).trim().toLowerCase()
+        : '';
+
+      if (cellValue === 'y' || cellValue === 'yes') {
+        yAddresses.push(address);
+      } else if (cellValue === 'n' || cellValue === 'no') {
+        nAddresses.push(address);
+      }
+      // All other values are intentionally ignored
+    }
+
+    setItemAnalysis({
+      yAddresses,
+      nAddresses,
+      hasConflict: yAddresses.length > 0 && nAddresses.length > 0,
+    });
+  };
+
+  /** Handler for the item dropdown */
+  const handleItemSelect = (e) => {
+    const val = e.target.value;
+    setSelectedItem(val);
+    if (val !== '') {
+      analyzeItem(val);
+    } else {
+      setItemAnalysis(null);
+    }
+  };
 
   /**
    * Handles uploading and processing Excel files
@@ -152,6 +217,47 @@ function App() {
     }
     
     return pairs;
+  };
+
+  /**
+   * Creates a formatted packing sheet Word document from item analysis results.
+   * Format: "ITEM: These addresses DO WANT" or "ITEM: These addresses DO NOT WANT"
+   * followed by one address per line.
+   */
+  const createItemAnalysisDocument = async (itemName, isYDoc, addresses) => {
+    const label = isYDoc ? 'These addresses DO WANT' : 'These addresses DO NOT WANT';
+    const doc = new Document({
+      sections: [{
+        properties: {},
+        children: [
+          new Paragraph({
+            children: [new TextRun({ text: `${itemName.toUpperCase()}: ${label}`, bold: true, size: 32 })],
+            spacing: { after: 200 },
+          }),
+          ...addresses.map(addr => new Paragraph({
+            children: [new TextRun({ text: addr, size: 24 })],
+            spacing: { after: 100 },
+          })),
+        ],
+      }],
+    });
+    return await Packer.toBlob(doc);
+  };
+
+  /** Downloads the item analysis result as a formatted Word document */
+  const downloadItemAnalysisDocument = async () => {
+    const itemHeader = getItemColumns().find(c => c.colIndex === parseInt(selectedItem, 10));
+    const itemName = itemHeader ? itemHeader.header : 'Item';
+    const isYDoc = itemAnalysis.yAddresses.length > 0;
+    const addresses = isYDoc ? itemAnalysis.yAddresses : itemAnalysis.nAddresses;
+    try {
+      const blob = await createItemAnalysisDocument(itemName, isYDoc, addresses);
+      const suffix = isYDoc ? 'DO_WANT' : 'DO_NOT_WANT';
+      saveAs(blob, `${itemName}_${suffix}.docx`);
+    } catch (error) {
+      console.error('Error creating document:', error);
+      alert('Error creating document. Please try again.');
+    }
   };
 
   /**
@@ -512,38 +618,115 @@ function App() {
                 <h3>Document Preview - {files[selectedFileIndex].originalName}</h3>
                 {/* Document preview styled like Word */}
                 <div className="document-preview">
-                  {(() => {
-                    const dataToExport = transpose ? transposeData(files[selectedFileIndex].data) : files[selectedFileIndex].data;
-                    const previews = splitColumns ? splitIntoColumnPairs(dataToExport) : [dataToExport];
-                    
-                    return previews.map((previewData, idx) => {
-                      const familyName = splitColumns && previewData[0]?.[1] ? previewData[0][1] : '';
+                  {itemAnalysis && !itemAnalysis.hasConflict ? (
+                    // Formatted item analysis preview
+                    (() => {
+                      const itemHeader = getItemColumns().find(c => c.colIndex === parseInt(selectedItem, 10));
+                      const itemName = itemHeader ? itemHeader.header.toUpperCase() : '';
+                      const isYDoc = itemAnalysis.yAddresses.length > 0;
+                      const addresses = isYDoc ? itemAnalysis.yAddresses : itemAnalysis.nAddresses;
+                      const label = isYDoc ? 'These addresses DO WANT' : 'These addresses DO NOT WANT';
                       return (
-                      <div key={idx} className="document-page">
-                        <h2 className="document-title">Packing Sheet{familyName ? ` ${familyName}` : ''}</h2>
-                        <div className="table-container">
-                          <table className="document-table">
-                            <tbody>
-                              {previewData.map((row, rowIndex) => (
-                                <tr key={rowIndex}>
-                                  {row.map((cell, cellIndex) => (
-                                    <td key={cellIndex}>
-                                      {cell !== null && cell !== undefined ? String(cell) : ''}
-                                    </td>
-                                  ))}
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                        <div className="document-page">
+                          <h2 className="document-title">{itemName}: {label}</h2>
+                          {addresses.map((addr, i) => (
+                            <p key={i} className="address-preview-item">{addr}</p>
+                          ))}
                         </div>
-                      </div>
-                    )});
-                  })()}
+                      );
+                    })()
+                  ) : (
+                    // Raw spreadsheet table preview
+                    (() => {
+                      const dataToExport = transpose ? transposeData(files[selectedFileIndex].data) : files[selectedFileIndex].data;
+                      const previews = splitColumns ? splitIntoColumnPairs(dataToExport) : [dataToExport];
+                      return previews.map((previewData, idx) => {
+                        const familyName = splitColumns && previewData[0]?.[1] ? previewData[0][1] : '';
+                        return (
+                          <div key={idx} className="document-page">
+                            <h2 className="document-title">Packing Sheet{familyName ? ` ${familyName}` : ''}</h2>
+                            <div className="table-container">
+                              <table className="document-table">
+                                <tbody>
+                                  {previewData.map((row, rowIndex) => (
+                                    <tr key={rowIndex}>
+                                      {row.map((cell, cellIndex) => (
+                                        <td key={cellIndex}>
+                                          {cell !== null && cell !== undefined ? String(cell) : ''}
+                                        </td>
+                                      ))}
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        );
+                      });
+                    })()
+                  )}
                 </div>
               </div>
             </div>
           )}
         </div>
+
+        {/* Item Analysis Section */}
+        {files.length > 0 && files[selectedFileIndex] && (
+          <div className="item-analysis-section">
+            <h3>Item Analysis</h3>
+            <div className="item-select-row">
+              <label htmlFor="item-select">Select an item:</label>
+              <select id="item-select" value={selectedItem} onChange={handleItemSelect}>
+                <option value="">-- Select an item --</option>
+                {getItemColumns().map(({ header, colIndex }) => (
+                  <option key={colIndex} value={colIndex}>{header}</option>
+                ))}
+              </select>
+            </div>
+
+            {itemAnalysis && (
+              <div className="analysis-results-container">
+                {itemAnalysis.hasConflict && (
+                  <div className="conflict-error">
+                    ⚠️ Error: This item has both &quot;Yes&quot; and &quot;No&quot; values in the same column.
+                  </div>
+                )}
+                {!itemAnalysis.hasConflict && (
+                  <button className="download-btn analysis-download-btn" onClick={downloadItemAnalysisDocument}>
+                    📄 Download Packing Sheet
+                  </button>
+                )}
+                <div className="analysis-results">
+                  <div className="address-list y-addresses">
+                    <h4>✅ DO Want ({itemAnalysis.yAddresses.length})</h4>
+                    {itemAnalysis.yAddresses.length > 0 ? (
+                      <ul>
+                        {itemAnalysis.yAddresses.map((addr, i) => (
+                          <li key={i}>{addr}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="no-entries">No entries</p>
+                    )}
+                  </div>
+                  <div className="address-list n-addresses">
+                    <h4>❌ DO NOT Want ({itemAnalysis.nAddresses.length})</h4>
+                    {itemAnalysis.nAddresses.length > 0 ? (
+                      <ul>
+                        {itemAnalysis.nAddresses.map((addr, i) => (
+                          <li key={i}>{addr}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="no-entries">No entries</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Download Buttons */}
         <div className="download-buttons-container">

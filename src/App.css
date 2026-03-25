@@ -424,3 +424,134 @@ table {
     font-size: 1.5rem;
   }
 }
+
+/* ── Item Analysis Section ────────────────────────────────── */
+.item-analysis-section {
+  background: #f8f9ff;
+  border-radius: 12px;
+  padding: 24px 28px;
+  margin-bottom: 24px;
+}
+
+.item-analysis-section h3 {
+  color: #333;
+  font-size: 1.3rem;
+  margin: 0 0 16px 0;
+}
+
+.item-select-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.item-select-row label {
+  font-weight: 600;
+  color: #444;
+  white-space: nowrap;
+}
+
+.item-select-row select {
+  padding: 10px 16px;
+  border: 2px solid #667eea;
+  border-radius: 8px;
+  font-size: 1rem;
+  color: #333;
+  background: white;
+  cursor: pointer;
+  min-width: 260px;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.item-select-row select:focus {
+  border-color: #764ba2;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
+}
+
+.analysis-results-container {
+  margin-top: 20px;
+}
+
+.conflict-error {
+  background: #fff3cd;
+  border: 2px solid #ffc107;
+  border-radius: 8px;
+  padding: 12px 18px;
+  color: #856404;
+  font-weight: 600;
+  font-size: 1rem;
+  margin-bottom: 16px;
+}
+
+.analysis-results {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+.address-list {
+  border-radius: 10px;
+  padding: 18px 20px;
+}
+
+.address-list h4 {
+  margin: 0 0 12px 0;
+  font-size: 1.05rem;
+}
+
+.address-list ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.address-list ul li {
+  padding: 4px 0;
+  color: #333;
+  font-size: 0.95rem;
+}
+
+.y-addresses {
+  background: #d4edda;
+  border: 2px solid #c3e6cb;
+}
+
+.y-addresses h4 {
+  color: #155724;
+}
+
+.n-addresses {
+  background: #f8d7da;
+  border: 2px solid #f5c6cb;
+}
+
+.n-addresses h4 {
+  color: #721c24;
+}
+
+.no-entries {
+  color: #888;
+  font-style: italic;
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.address-preview-item {
+  margin: 0 0 8px 0;
+  font-size: 1rem;
+  color: #333;
+}
+
+.analysis-download-btn {
+  display: block;
+  margin: 0 0 16px 0;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+}
+
+@media (max-width: 600px) {
+  .analysis-results {
+    grid-template-columns: 1fr;
+  }
+}
