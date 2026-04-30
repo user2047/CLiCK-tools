@@ -254,6 +254,121 @@ h1 {
   user-select: none;
 }
 
+.mode-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.mode-option {
+  border: 1px solid #667eea;
+  background: white;
+  color: #334;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.mode-option.active {
+  background: #334155;
+  border-color: #334155;
+  color: white;
+  box-shadow: 0 4px 12px rgba(51, 65, 85, 0.25);
+}
+
+.sheet-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  margin-bottom: 16px;
+  border: 1px solid #d7def0;
+  border-radius: 8px;
+  color: #334155;
+  font-weight: 600;
+}
+
+.item-selection {
+  border-top: 1px solid #d7def0;
+  padding-top: 16px;
+}
+
+.item-selection-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+  color: #334155;
+  font-weight: 700;
+}
+
+.selection-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.selection-actions button {
+  border: 1px solid #c7d2fe;
+  background: white;
+  color: #334155;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.selection-actions button:hover {
+  background: #eef2ff;
+}
+
+.item-toggle-list {
+  display: grid;
+  gap: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.item-toggle {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 10px;
+  background: white;
+  border: 1px solid #d7def0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.item-toggle input {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  accent-color: #667eea;
+}
+
+.item-toggle-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.item-toggle-name {
+  color: #1f2937;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.item-toggle-count {
+  color: #64748b;
+  font-size: 0.85rem;
+}
+
 /* Document preview styled like Word */
 .document-preview {
   background: #525659;
@@ -286,8 +401,21 @@ h1 {
   font-size: 1.5rem;
   font-weight: bold;
   color: #333;
-  margin: 0 0 20px 0;
-  text-align: left;
+  margin: 0 0 8px 0;
+  text-align: center;
+}
+
+.document-list-mode {
+  margin: 0 0 10px 0;
+  text-align: center;
+  color: #555;
+  font-size: 0.95rem;
+}
+
+.document-count {
+  margin: 0 0 18px 0;
+  color: #555;
+  font-size: 0.95rem;
 }
 
 .table-container {
@@ -309,6 +437,15 @@ table {
   text-align: left;
   font-size: 0.9rem;
   color: #000;
+}
+
+.document-table.no-borders td {
+  border: none;
+}
+
+.document-table tr:first-child td {
+  font-weight: 700;
+  background: #eef2f7;
 }
 
 .document-table tr:nth-child(even) {
@@ -355,6 +492,11 @@ table {
 .download-zip-btn {
   background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
   box-shadow: 0 4px 15px rgba(79, 172, 254, 0.3);
+}
+
+.print-btn {
+  background: linear-gradient(135deg, #2dd4bf 0%, #0f766e 100%);
+  box-shadow: 0 4px 15px rgba(15, 118, 110, 0.3);
 }
 
 .download-all-btn:hover:not(:disabled) {
