@@ -1,10 +1,13 @@
 // Import necessary React hooks and libraries
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import * as XLSX from 'xlsx'; // Library for reading Excel files
 import { AlignmentType, Document, Packer, Paragraph, TextRun } from 'docx'; // Library for creating Word documents
 import { saveAs } from 'file-saver'; // Library for downloading files
 import JSZip from 'jszip'; // Library for creating ZIP files
 import './App.css';
+
+const EXAMPLE_WORKBOOK_NAME = 'ExampleData.xlsx';
+const EXAMPLE_WORKBOOK_PATH = `${process.env.PUBLIC_URL || ''}/${EXAMPLE_WORKBOOK_NAME}`;
 
 const LABEL_ALIASES = [
   ['family', 'family name', 'household', 'household name', 'client', 'client name', 'name'],
@@ -482,6 +485,27 @@ const getPackingSheets = (fileData, listMode) => {
   });
 };
 
+const parseWorkbookFile = async (file, index = 0) => {
+  const data = await file.arrayBuffer();
+  const workbook = XLSX.read(data, { type: 'array', cellDates: true });
+  const extracted = extractBestWorksheet(workbook);
+
+  if (!extracted) return null;
+
+  return {
+    id: `${Date.now()}-${index}-${file.name}`,
+    name: sanitizeFilePart(file.name.replace(/\.[^/.]+$/, '')),
+    data: extracted.data,
+    originalName: workbook.SheetNames.length > 1
+      ? `${file.name} - ${extracted.sheetName}`
+      : file.name,
+    sheetName: extracted.sheetName,
+    transposeByDefault: extracted.transposeByDefault,
+    splitByDefault: extracted.splitByDefault,
+    packingConfig: extracted.packingConfig
+  };
+};
+
 function App() {
   // State management
   const [files, setFiles] = useState([]); // Array of uploaded Excel files with their data
@@ -491,6 +515,36 @@ function App() {
   const [showPreview, setShowPreview] = useState(true); // Whether to show the document preview
   const [selectedPackingSheetKeys, setSelectedPackingSheetKeys] = useState({}); // Per item/page output selection
   const [selectedItemKey, setSelectedItemKey] = useState(''); // Single item used by Generate Selected Packing Sheet
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadExampleWorkbook = async () => {
+      try {
+        const response = await fetch(EXAMPLE_WORKBOOK_PATH);
+        if (!response.ok) return;
+
+        const blob = await response.blob();
+        const file = new File([blob], EXAMPLE_WORKBOOK_NAME, {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        });
+        const exampleFile = await parseWorkbookFile(file);
+
+        if (!isMounted || !exampleFile) return;
+
+        setFiles(prev => (prev.length > 0 ? prev : [exampleFile]));
+        setSelectedFileIndex(0);
+      } catch (error) {
+        console.warn('Unable to load example workbook:', error);
+      }
+    };
+
+    loadExampleWorkbook();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   /**
    * Handles uploading and processing Excel files
@@ -508,29 +562,10 @@ function App() {
       // Only process Excel files (.xlsx or .xls)
       if (file.name.match(/\.(xlsx|xls)$/i)) {
         try {
-          // Read file as array buffer
-          const data = await file.arrayBuffer();
-          // Parse Excel workbook and extract the best data table. Newer MESA
-          // exports can include title/metadata rows or a summary sheet before
-          // the actual packing data.
-          const workbook = XLSX.read(data, { type: 'array', cellDates: true });
-          const extracted = extractBestWorksheet(workbook);
-
-          if (!extracted) continue;
-          
-          // Store file data with metadata
-          newFiles.push({
-            id: `${Date.now()}-${i}-${file.name}`,
-            name: sanitizeFilePart(file.name.replace(/\.[^/.]+$/, '')), // Remove file extension
-            data: extracted.data,
-            originalName: workbook.SheetNames.length > 1
-              ? `${file.name} - ${extracted.sheetName}`
-              : file.name,
-            sheetName: extracted.sheetName,
-            transposeByDefault: extracted.transposeByDefault,
-            splitByDefault: extracted.splitByDefault,
-            packingConfig: extracted.packingConfig
-          });
+          // Newer MESA exports can include title/metadata rows or a summary
+          // sheet before the actual packing data.
+          const parsedFile = await parseWorkbookFile(file, i);
+          if (parsedFile) newFiles.push(parsedFile);
         } catch (error) {
           console.error(`Error reading file ${file.name}:`, error);
         }

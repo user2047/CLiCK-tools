@@ -15,6 +15,7 @@ The app reads uploaded `.xlsx` and `.xls` files in the browser, detects the pack
 - Preview selected pages before generating or printing.
 - Print only the selected preview pages.
 - Toggle preview page selection with all/none controls.
+- Preload a synthetic example workbook for local testing and demos.
 
 ## Expected Workbook Format
 
@@ -43,7 +44,7 @@ Address              Household size    Diapers - D    Cat Food - DN
 
 Do not commit real recipient spreadsheets, generated packing sheets, or files containing names, addresses, phone numbers, email addresses, or household details.
 
-This repository should contain only application source code, configuration, and documentation with placeholder data.
+This repository should contain only application source code, configuration, documentation with placeholder data, and synthetic demo files. The app preloads `public/ExampleData.xlsx`, so that file is public when the site is deployed.
 
 ## Local Development
 
