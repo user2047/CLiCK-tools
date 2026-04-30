@@ -256,7 +256,7 @@ h1 {
 
 .mode-toggle {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 8px;
   margin-bottom: 16px;
 }
@@ -296,6 +296,10 @@ h1 {
   padding-top: 16px;
 }
 
+.item-selection + .item-selection {
+  margin-top: 16px;
+}
+
 .item-selection-header {
   display: flex;
   justify-content: space-between;
@@ -304,6 +308,23 @@ h1 {
   margin-bottom: 10px;
   color: #334155;
   font-weight: 700;
+}
+
+.single-item-select {
+  display: grid;
+  gap: 8px;
+  color: #334155;
+  font-weight: 700;
+}
+
+.single-item-select select {
+  width: 100%;
+  border: 1px solid #d7def0;
+  border-radius: 8px;
+  background: white;
+  color: #1f2937;
+  padding: 10px 12px;
+  font: inherit;
 }
 
 .selection-actions {
@@ -398,11 +419,12 @@ h1 {
 }
 
 .document-title {
-  font-size: 1.5rem;
+  font-size: 1.3rem;
   font-weight: bold;
   color: #333;
-  margin: 0 0 8px 0;
+  margin: 0 0 14px 0;
   text-align: center;
+  line-height: 1.25;
 }
 
 .document-list-mode {
@@ -416,44 +438,36 @@ h1 {
   margin: 0 0 18px 0;
   color: #555;
   font-size: 0.95rem;
+  text-align: center;
 }
 
-.table-container {
-  overflow-x: auto;
-  border-radius: 0;
-  box-shadow: none;
-  margin-bottom: 10px;
+.recipient-list {
+  display: grid;
+  gap: 10px;
 }
 
-table {
-  width: 100%;
-  border-collapse: collapse;
-  background: white;
-}
-
-.document-table td {
-  padding: 8px 12px;
-  border: 1px solid #333;
-  text-align: left;
-  font-size: 0.9rem;
+.recipient-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  margin: 0;
   color: #000;
+  font-size: 1rem;
+  line-height: 1.35;
 }
 
-.document-table.no-borders td {
-  border: none;
+.recipient-line span:first-child {
+  overflow-wrap: anywhere;
 }
 
-.document-table tr:first-child td {
-  font-weight: 700;
-  background: #eef2f7;
+.recipient-line span:last-child {
+  flex-shrink: 0;
+  color: #333;
 }
 
-.document-table tr:nth-child(even) {
-  background: white;
-}
-
-.document-table tr:hover {
-  background: #f5f5f5;
+.recipient-line.muted {
+  color: #666;
+  font-style: italic;
 }
 
 .preview-note {
@@ -492,6 +506,11 @@ table {
 .download-zip-btn {
   background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
   box-shadow: 0 4px 15px rgba(79, 172, 254, 0.3);
+}
+
+.download-selected-btn {
+  background: linear-gradient(135deg, #4facfe 0%, #0f5f99 100%);
+  box-shadow: 0 4px 15px rgba(15, 95, 153, 0.3);
 }
 
 .print-btn {

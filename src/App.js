@@ -1,7 +1,7 @@
 // Import necessary React hooks and libraries
 import React, { useState } from 'react';
 import * as XLSX from 'xlsx'; // Library for reading Excel files
-import { AlignmentType, Document, Packer, Paragraph, Table, TableBorders, TableCell, TableRow, TextRun } from 'docx'; // Library for creating Word documents
+import { AlignmentType, Document, Packer, Paragraph, TextRun } from 'docx'; // Library for creating Word documents
 import { saveAs } from 'file-saver'; // Library for downloading files
 import JSZip from 'jszip'; // Library for creating ZIP files
 import './App.css';
@@ -245,13 +245,17 @@ const escapeHtml = (value) => {
 };
 
 const LIST_MODES = {
+  auto: {
+    label: 'Auto by item',
+    title: 'Auto'
+  },
   white: {
-    label: 'White list',
-    title: 'Getting'
+    label: 'DO want',
+    title: 'DO Want'
   },
   black: {
-    label: 'Black list',
-    title: 'Not getting'
+    label: 'DO NOT want',
+    title: 'DO NOT Want'
   }
 };
 
@@ -340,6 +344,27 @@ const isItemHeader = (header) => {
   return !NON_ITEM_HEADER_PARTS.some(part => key === part || key.includes(part));
 };
 
+const getPackingSheetHeading = (packingSheet) => {
+  return `✅ These addresses ${packingSheet.listLabel}...${packingSheet.itemName}`;
+};
+
+const getHouseholdSizeText = (householdSize) => {
+  return `(Household size: ${normalizeCell(householdSize) || 'N/A'})`;
+};
+
+const cleanItemLabel = (label) => {
+  return normalizeCell(label)
+    .replace(/\s*-\s*D(?:N)?\s*$/i, '')
+    .trim();
+};
+
+const getItemModeMarker = (label) => {
+  const cleanLabel = normalizeCell(label);
+  if (/\s*-\s*DN\s*$/i.test(cleanLabel)) return 'black';
+  if (/\s*-\s*D\s*$/i.test(cleanLabel)) return 'white';
+  return null;
+};
+
 const isGettingItem = (value) => {
   const raw = normalizeCell(value);
   if (!raw) return false;
@@ -349,6 +374,17 @@ const isGettingItem = (value) => {
   if (key.startsWith('no ') || key.startsWith('do not ') || key.startsWith('dont ')) return false;
 
   return true;
+};
+
+const isNotGettingItem = (value) => {
+  const raw = normalizeCell(value);
+  if (!raw) return false;
+
+  const key = normalizeKey(raw).replace(/'/g, '');
+  return NEGATIVE_VALUES.has(key)
+    || key.startsWith('no ')
+    || key.startsWith('do not ')
+    || key.startsWith('dont ');
 };
 
 const getPackingSheetConfig = (data) => {
@@ -365,12 +401,25 @@ const getPackingSheetConfig = (data) => {
   const householdSizeIndex = findHeaderIndex(headers, HOUSEHOLD_SIZE_HEADERS);
   const firstItemIndex = addressIndex >= 0 ? addressIndex + 1 : 0;
 
-  const itemColumns = headers
-    .map((header, index) => ({ index, label: normalizeCell(header) }))
-    .filter(({ index, label }) => {
-      if (index < firstItemIndex || index === addressIndex || index === householdSizeIndex) return false;
-      return isItemHeader(label);
+  let inferredItemMode = 'white';
+  const itemColumns = headers.reduce((columns, header, index) => {
+    const sourceLabel = normalizeCell(header);
+    if (index < firstItemIndex || index === addressIndex || index === householdSizeIndex) return columns;
+    if (!isItemHeader(sourceLabel)) return columns;
+
+    const markedMode = getItemModeMarker(sourceLabel);
+    if (markedMode) {
+      inferredItemMode = markedMode;
+    }
+
+    columns.push({
+      index,
+      sourceLabel,
+      label: cleanItemLabel(sourceLabel),
+      listMode: markedMode || inferredItemMode
     });
+    return columns;
+  }, []);
 
   return {
     addressIndex,
@@ -394,6 +443,9 @@ const getPackingSheets = (fileData, listMode) => {
   const rows = fileData.data.slice(1);
 
   return config.itemColumns.map(itemColumn => {
+    const effectiveListMode = listMode === 'auto' ? itemColumn.listMode : listMode;
+    const listLabel = LIST_MODES[effectiveListMode].title;
+    const useExplicitOptOuts = listMode === 'auto' && effectiveListMode === 'black';
     const recipients = rows
       .map(row => {
         const address = normalizeCell(row[config.addressIndex]);
@@ -402,32 +454,30 @@ const getPackingSheets = (fileData, listMode) => {
           : '';
         const itemValue = normalizeCell(row[itemColumn.index]);
         const gettingItem = isGettingItem(itemValue);
+        const notGettingItem = isNotGettingItem(itemValue);
 
         return {
           address,
           householdSize,
           itemValue,
-          gettingItem
+          gettingItem,
+          notGettingItem
         };
       })
       .filter(recipient => recipient.address !== '')
-      .filter(recipient => listMode === 'white' ? recipient.gettingItem : !recipient.gettingItem);
-
-    const tableRows = [
-      ['Address', 'Household Size', 'Details'],
-      ...recipients.map(recipient => [
-        recipient.address,
-        recipient.householdSize,
-        recipient.itemValue || (listMode === 'black' ? 'Not marked' : '')
-      ])
-    ];
+      .filter(recipient => {
+        if (effectiveListMode === 'white') return recipient.gettingItem;
+        if (useExplicitOptOuts) return recipient.notGettingItem;
+        return !recipient.gettingItem;
+      });
 
     return {
-      itemKey: `${itemColumn.index}-${itemColumn.label}`,
+      itemKey: `${itemColumn.index}-${itemColumn.sourceLabel}`,
       itemName: itemColumn.label,
-      title: `${itemColumn.label} - ${LIST_MODES[listMode].label}`,
-      recipients,
-      rows: tableRows
+      title: `${itemColumn.label} - ${listLabel}`,
+      listMode: effectiveListMode,
+      listLabel,
+      recipients
     };
   });
 };
@@ -437,10 +487,10 @@ function App() {
   const [files, setFiles] = useState([]); // Array of uploaded Excel files with their data
   const [selectedFileIndex, setSelectedFileIndex] = useState(0); // Index of currently selected file for preview
   const [isDragging, setIsDragging] = useState(false); // Track drag-and-drop state for visual feedback
-  const [listMode, setListMode] = useState('white'); // Whether packing sheets list recipients getting or not getting each item
+  const listMode = 'auto'; // Packing sheet type is determined by each item column suffix.
   const [showPreview, setShowPreview] = useState(true); // Whether to show the document preview
-  const [includeBorders, setIncludeBorders] = useState(true); // Whether output tables include borders
   const [selectedPackingSheetKeys, setSelectedPackingSheetKeys] = useState({}); // Per item/page output selection
+  const [selectedItemKey, setSelectedItemKey] = useState(''); // Single item used by Generate Selected Packing Sheet
 
   /**
    * Handles uploading and processing Excel files
@@ -537,76 +587,59 @@ function App() {
   };
 
   /**
-   * Creates a Word document (.docx) from packing sheet rows.
+   * Creates a Word document (.docx) from one packing sheet.
    * @param {Object} packingSheet - Packing sheet to include
    * @returns {Blob} Word document as a blob
    */
-  const createTableDocument = async (packingSheet) => {
-    const { itemName, rows } = packingSheet;
-    // Convert each row of data into Word table rows
-    const tableRows = rows.map((row) => {
-      return new TableRow({
-        children: row.map((cell) => {
-          // Each cell contains a paragraph with text
-          return new TableCell({
-            children: [
-              new Paragraph({
-                children: [
-                  new TextRun({
-                    text: cell !== null && cell !== undefined ? String(cell) : '',
-                    bold: row === rows[0],
-                    size: 20, // Font size in half-points (20 = 10pt)
-                  }),
-                ],
-              }),
-            ],
-            borders: includeBorders ? undefined : TableBorders.NONE,
-          });
+  const createPackingSheetDocument = async (packingSheet) => {
+    const heading = getPackingSheetHeading(packingSheet);
+    const recipientParagraphs = packingSheet.recipients.length > 0
+      ? packingSheet.recipients.map(recipient => new Paragraph({
+        children: [
+          new TextRun({
+            text: recipient.address,
+            size: 24,
+          }),
+          new TextRun({
+            text: `    ${getHouseholdSizeText(recipient.householdSize)}`,
+            size: 24,
+          }),
+        ],
+        spacing: {
+          after: 120,
+        },
+      }))
+      : [
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: 'No addresses marked for this item.',
+              italics: true,
+              size: 24,
+            }),
+          ],
         }),
-      });
-    });
+      ];
 
-    // Create Word document with title and table
     const doc = new Document({
       sections: [
         {
           properties: {},
           children: [
-            // Title paragraph
             new Paragraph({
               children: [
                 new TextRun({
-                  text: itemName,
+                  text: heading,
                   bold: true,
                   size: 32, // 16pt font
                 }),
               ],
               alignment: AlignmentType.CENTER,
               spacing: {
-                after: 80,
+                after: 320,
               },
             }),
-            new Paragraph({
-              children: [
-                new TextRun({
-                  text: LIST_MODES[listMode].label,
-                  size: 20,
-                }),
-              ],
-              alignment: AlignmentType.CENTER,
-              spacing: {
-                after: 200, // Space after title
-              },
-            }),
-            // Data table
-            new Table({
-              rows: tableRows,
-              width: {
-                size: 100,
-                type: 'pct', // 100% width
-              },
-              borders: includeBorders ? undefined : TableBorders.NONE,
-            }),
+            ...recipientParagraphs,
           ],
         },
       ],
@@ -625,6 +658,9 @@ function App() {
   const isPackingSheetSelected = (packingSheet) => selectedPackingSheetKeys[getSelectionKey(packingSheet)] !== false;
   const selectedPackingSheets = packingSheets.filter(isPackingSheetSelected);
   const selectedPackingSheetCount = selectedPackingSheets.length;
+  const selectedItemPackingSheet = packingSheets.find(packingSheet => packingSheet.itemKey === selectedItemKey)
+    || packingSheets[0]
+    || null;
 
   const setAllPackingSheetsSelected = (selected) => {
     setSelectedPackingSheetKeys(prev => {
@@ -643,33 +679,54 @@ function App() {
     }));
   };
 
-  const downloadAllPackingSheets = async () => {
+  const generatePackingSheetFiles = async (sheetsToGenerate, fileLabel) => {
+    try {
+      if (sheetsToGenerate.length === 1) {
+        const packingSheet = sheetsToGenerate[0];
+        const blob = await createPackingSheetDocument(packingSheet);
+        saveAs(blob, `${sanitizeFilePart(packingSheet.itemName)}_${packingSheet.listMode}.docx`);
+        alert(`Successfully created ${packingSheet.itemName} packing sheet!`);
+        return;
+      }
+
+      const zip = new JSZip();
+      const folder = zip.folder(`${sanitizeFilePart(currentFile.name)}_${fileLabel}_packing_sheets`);
+
+      for (const packingSheet of sheetsToGenerate) {
+        const blob = await createPackingSheetDocument(packingSheet);
+        folder.file(`${sanitizeFilePart(packingSheet.itemName)}_${packingSheet.listMode}.docx`, blob);
+      }
+
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      saveAs(zipBlob, `${sanitizeFilePart(currentFile.name)}_${fileLabel}_packing_sheets.zip`);
+      alert(`Successfully created ${sheetsToGenerate.length} packing sheets!`);
+    } catch (error) {
+      console.error('Error creating packing sheets:', error);
+      alert('Error creating packing sheets. Please try again.');
+    }
+  };
+
+  const generateAllPackingSheets = async () => {
     if (!currentFile || packingSheets.length === 0) {
       alert('Please upload a MESA Excel file with address and item columns first!');
       return;
     }
 
-    if (selectedPackingSheets.length === 0) {
-      alert('Please select at least one item page to download.');
+    await generatePackingSheetFiles(packingSheets, 'all');
+  };
+
+  const generateSelectedPackingSheets = async () => {
+    if (!currentFile || packingSheets.length === 0) {
+      alert('Please upload a MESA Excel file with address and item columns first!');
       return;
     }
 
-    try {
-      const zip = new JSZip();
-      const folder = zip.folder(`${sanitizeFilePart(currentFile.name)}_${listMode}_packing_sheets`);
-
-      for (const packingSheet of selectedPackingSheets) {
-        const blob = await createTableDocument(packingSheet);
-        folder.file(`${sanitizeFilePart(packingSheet.itemName)}_${listMode}.docx`, blob);
-      }
-
-      const zipBlob = await zip.generateAsync({ type: 'blob' });
-      saveAs(zipBlob, `${sanitizeFilePart(currentFile.name)}_${listMode}_packing_sheets.zip`);
-      alert(`Successfully created ${selectedPackingSheets.length} packing sheet${selectedPackingSheets.length > 1 ? 's' : ''}!`);
-    } catch (error) {
-      console.error('Error creating packing sheets:', error);
-      alert('Error creating packing sheets. Please try again.');
+    if (!selectedItemPackingSheet) {
+      alert('Please select an item page to generate.');
+      return;
     }
+
+    await generatePackingSheetFiles([selectedItemPackingSheet], 'selected');
   };
 
   const printSelectedPackingSheets = () => {
@@ -683,22 +740,19 @@ function App() {
       return;
     }
 
-    const borderCss = includeBorders
-      ? 'td { border: 1px solid #333; }'
-      : 'td { border: none; }';
     const pagesHtml = selectedPackingSheets.map(packingSheet => `
       <section class="page">
-        <h1>${escapeHtml(packingSheet.itemName)}</h1>
-        <p class="list-mode">${escapeHtml(LIST_MODES[listMode].label)}</p>
-        <table>
-          <tbody>
-            ${packingSheet.rows.map((row, rowIndex) => `
-              <tr class="${rowIndex === 0 ? 'header-row' : ''}">
-                ${row.map(cell => `<td>${escapeHtml(cell)}</td>`).join('')}
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
+        <h1>${escapeHtml(getPackingSheetHeading(packingSheet))}</h1>
+        <div class="recipient-list">
+          ${packingSheet.recipients.length > 0
+            ? packingSheet.recipients.map(recipient => `
+              <p class="recipient-line">
+                <span>${escapeHtml(recipient.address)}</span>
+                <span>${escapeHtml(getHouseholdSizeText(recipient.householdSize))}</span>
+              </p>
+            `).join('')
+            : '<p class="recipient-line muted">No addresses marked for this item.</p>'}
+        </div>
       </section>
     `).join('');
 
@@ -731,28 +785,24 @@ function App() {
               page-break-after: auto;
             }
             h1 {
-              margin: 0 0 6px 0;
+              margin: 0 0 28px 0;
               text-align: center;
               font-size: 18pt;
             }
-            .list-mode {
-              margin: 0 0 18px 0;
-              text-align: center;
-              font-size: 10pt;
+            .recipient-list {
+              display: grid;
+              gap: 10px;
             }
-            table {
-              width: 100%;
-              border-collapse: collapse;
+            .recipient-line {
+              display: flex;
+              justify-content: space-between;
+              gap: 24px;
+              margin: 0;
+              font-size: 12pt;
             }
-            td {
-              padding: 6px 8px;
-              font-size: 10pt;
-              vertical-align: top;
-            }
-            ${borderCss}
-            .header-row td {
-              font-weight: 700;
-              background: #eef2f7;
+            .muted {
+              color: #666;
+              font-style: italic;
             }
             @page {
               margin: 0.5in;
@@ -864,31 +914,9 @@ function App() {
             {files.length > 0 && files[selectedFileIndex] && (
               <div className="options-section">
                 <h3>Options</h3>
-                <div className="mode-toggle" role="group" aria-label="Packing sheet mode">
-                  {Object.entries(LIST_MODES).map(([mode, option]) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      className={`mode-option ${listMode === mode ? 'active' : ''}`}
-                      onClick={() => setListMode(mode)}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
                 <div className="sheet-summary">
                   <span>{selectedPackingSheetCount} of {packingSheets.length} selected</span>
                   <span>{files[selectedFileIndex].sheetName}</span>
-                </div>
-                <div className="transpose-toggle">
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={includeBorders}
-                      onChange={(e) => setIncludeBorders(e.target.checked)}
-                    />
-                    <span>Show table borders</span>
-                  </label>
                 </div>
                 {/* Show preview toggle checkbox */}
                 <div className="transpose-toggle">
@@ -903,7 +931,26 @@ function App() {
                 </div>
                 <div className="item-selection">
                   <div className="item-selection-header">
-                    <span>Item pages</span>
+                    <span>Generate one item</span>
+                  </div>
+                  <label className="single-item-select" htmlFor="single-item-select">
+                    <span>Selected item</span>
+                    <select
+                      id="single-item-select"
+                      value={selectedItemPackingSheet?.itemKey || ''}
+                      onChange={(e) => setSelectedItemKey(e.target.value)}
+                    >
+                      {packingSheets.map((packingSheet) => (
+                        <option key={packingSheet.itemKey} value={packingSheet.itemKey}>
+                          {packingSheet.itemName} - {packingSheet.listLabel}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <div className="item-selection">
+                  <div className="item-selection-header">
+                    <span>Preview / print pages</span>
                     <div className="selection-actions">
                       <button type="button" onClick={() => setAllPackingSheetsSelected(true)}>All</button>
                       <button type="button" onClick={() => setAllPackingSheetsSelected(false)}>None</button>
@@ -920,7 +967,7 @@ function App() {
                         <span className="item-toggle-copy">
                           <span className="item-toggle-name">{packingSheet.itemName}</span>
                           <span className="item-toggle-count">
-                            {packingSheet.recipients.length} address{packingSheet.recipients.length === 1 ? '' : 'es'}
+                            {packingSheet.listLabel} - {packingSheet.recipients.length} address{packingSheet.recipients.length === 1 ? '' : 'es'}
                           </span>
                         </span>
                       </label>
@@ -935,31 +982,27 @@ function App() {
           {files.length > 0 && files[selectedFileIndex] && showPreview && (
             <div className="right-section">
               <div className="preview-section">
-                <h3>{LIST_MODES[listMode].label} Preview - {files[selectedFileIndex].originalName}</h3>
+                <h3>Packing Sheet Preview - {files[selectedFileIndex].originalName}</h3>
                 {/* Document preview styled like Word */}
                 <div className="document-preview">
                   {selectedPackingSheets.length > 0 ? (
                     selectedPackingSheets.map((packingSheet) => (
                       <div key={packingSheet.itemKey} className="document-page">
-                        <h2 className="document-title">{packingSheet.itemName}</h2>
-                        <p className="document-list-mode">{LIST_MODES[listMode].label}</p>
+                        <h2 className="document-title">{getPackingSheetHeading(packingSheet)}</h2>
                         <p className="document-count">
                           {packingSheet.recipients.length} address{packingSheet.recipients.length === 1 ? '' : 'es'}
                         </p>
-                        <div className="table-container">
-                          <table className={`document-table ${includeBorders ? '' : 'no-borders'}`}>
-                            <tbody>
-                              {packingSheet.rows.map((row, rowIndex) => (
-                                <tr key={rowIndex}>
-                                  {row.map((cell, cellIndex) => (
-                                    <td key={cellIndex}>
-                                      {cell !== null && cell !== undefined ? String(cell) : ''}
-                                    </td>
-                                  ))}
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                        <div className="recipient-list">
+                          {packingSheet.recipients.length > 0 ? (
+                            packingSheet.recipients.map((recipient, recipientIndex) => (
+                              <p key={recipientIndex} className="recipient-line">
+                                <span>{recipient.address}</span>
+                                <span>{getHouseholdSizeText(recipient.householdSize)}</span>
+                              </p>
+                            ))
+                          ) : (
+                            <p className="recipient-line muted">No addresses marked for this item.</p>
+                          )}
                         </div>
                       </div>
                     ))
@@ -983,10 +1026,17 @@ function App() {
         <div className="download-buttons-container">
           <button
             className="download-btn"
-            onClick={downloadAllPackingSheets}
-            disabled={packingSheets.length === 0 || selectedPackingSheetCount === 0}
+            onClick={generateAllPackingSheets}
+            disabled={packingSheets.length === 0}
           >
-            Download Selected Packing Sheets ({selectedPackingSheetCount})
+            Generate All Packing Sheets ({packingSheets.length})
+          </button>
+          <button
+            className="download-btn download-selected-btn"
+            onClick={generateSelectedPackingSheets}
+            disabled={packingSheets.length === 0 || !selectedItemPackingSheet}
+          >
+            Generate Selected Packing Sheet
           </button>
           <button
             className="download-btn print-btn"

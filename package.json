@@ -2,6 +2,7 @@
   "name": "excel-to-word-converter",
   "version": "1.0.0",
   "private": true,
+  "homepage": ".",
   "dependencies": {
     "docx": "^8.5.0",
     "file-saver": "^2.0.5",
