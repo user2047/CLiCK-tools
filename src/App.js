@@ -1,7 +1,7 @@
 // Import necessary React hooks and libraries
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as XLSX from 'xlsx'; // Library for reading Excel files
-import { AlignmentType, Document, Packer, Paragraph, TextRun } from 'docx'; // Library for creating Word documents
+import { AlignmentType, Document, Packer, Paragraph, TabStopType, TextRun } from 'docx'; // Library for creating Word documents
 import { saveAs } from 'file-saver'; // Library for downloading files
 import JSZip from 'jszip'; // Library for creating ZIP files
 import './App.css';
@@ -348,12 +348,134 @@ const isItemHeader = (header) => {
 };
 
 const getPackingSheetHeading = (packingSheet) => {
+  if (packingSheet.itemName) return packingSheet.itemName;
   return `✅ These addresses ${packingSheet.listLabel}...${packingSheet.itemName}`;
 };
 
-const getHouseholdSizeText = (householdSize) => {
-  return `(Household size: ${normalizeCell(householdSize) || 'N/A'})`;
+const getPackingSheetStatusLine = (packingSheet) => {
+  if (packingSheet.listMode === 'black') {
+    return '\u274E NO (These addresses DO NOT want) \u274E';
+  }
+
+  return '\u2705 YES (These addresses DO want) \u2705';
 };
+
+const getPackingSheetStatusColor = (packingSheet) => {
+  return packingSheet.listMode === 'black' ? '#C00000' : '#008000';
+};
+
+const getHouseholdSizeValue = (householdSize) => {
+  return normalizeCell(householdSize) || 'N/A';
+};
+
+const PACKING_SHEET_MARGIN_TWIPS = 360;
+const QUANTITY_COLUMN_LABEL = 'Quantity';
+const RECIPIENT_ADDRESS_TAB_TWIPS = 2000;
+const FONT_FAMILIES = ['Arial', 'Calibri', 'Times New Roman', 'Georgia', 'Verdana'];
+const LINE_SPACING_OPTIONS = [
+  { value: 'single', label: 'Single', multiplier: 1 },
+  { value: '1.15', label: '1.15', multiplier: 1.15 },
+  { value: '1.5', label: '1.5', multiplier: 1.5 },
+  { value: 'double', label: 'Double', multiplier: 2 },
+];
+const DEFAULT_FONT_SETTINGS = {
+  family: 'Arial',
+  sizePt: 18,
+  color: '#000000',
+  bold: true,
+  italic: false,
+  underline: false,
+  lineSpacing: 'double',
+};
+
+const clampNumber = (value, min, max) => {
+  return Math.min(max, Math.max(min, value));
+};
+
+const normalizeFontSettings = (settings) => {
+  const merged = { ...DEFAULT_FONT_SETTINGS, ...settings };
+  const family = FONT_FAMILIES.includes(merged.family)
+    ? merged.family
+    : DEFAULT_FONT_SETTINGS.family;
+  const color = /^#[0-9a-f]{6}$/i.test(merged.color)
+    ? merged.color
+    : DEFAULT_FONT_SETTINGS.color;
+  const lineSpacing = LINE_SPACING_OPTIONS.some(option => option.value === merged.lineSpacing)
+    ? merged.lineSpacing
+    : DEFAULT_FONT_SETTINGS.lineSpacing;
+
+  return {
+    family,
+    sizePt: clampNumber(Number(merged.sizePt) || DEFAULT_FONT_SETTINGS.sizePt, 6, 24),
+    color,
+    bold: Boolean(merged.bold),
+    italic: Boolean(merged.italic),
+    underline: Boolean(merged.underline),
+    lineSpacing,
+  };
+};
+
+const getDocxColor = (color) => color.replace('#', '').toUpperCase();
+
+const getPackingSheetTextSizing = (fontSettings) => {
+  const normalizedSettings = normalizeFontSettings(fontSettings);
+  const lineSpacingOption = LINE_SPACING_OPTIONS.find(option => option.value === normalizedSettings.lineSpacing)
+    || LINE_SPACING_OPTIONS[0];
+  const recipientFontPt = normalizedSettings.sizePt;
+  const headingFontPt = clampNumber(recipientFontPt + 2, 8, 28);
+  const recipientGapPt = 0;
+
+  return {
+    ...normalizedSettings,
+    headingFontPt,
+    recipientFontPt,
+    recipientGapPt,
+    headingSpacingAfterPt: Math.round(clampNumber(headingFontPt * 0.6, 8, 18)),
+    recipientSpacingAfterPt: recipientGapPt,
+    recipientLineHeight: lineSpacingOption.multiplier,
+    docxLineSpacing: Math.round(lineSpacingOption.multiplier * 240),
+    docxColor: getDocxColor(normalizedSettings.color),
+  };
+};
+
+const getPackingSheetPreviewStyle = (textSizing) => {
+  return {
+    '--document-font-family': textSizing.family,
+    '--document-heading-size': `${textSizing.headingFontPt}pt`,
+    '--document-heading-space': `${textSizing.headingSpacingAfterPt}pt`,
+    '--document-recipient-size': `${textSizing.recipientFontPt}pt`,
+    '--document-recipient-gap': `${textSizing.recipientGapPt}pt`,
+    '--document-recipient-line-height': String(textSizing.recipientLineHeight),
+    '--document-font-color': textSizing.color,
+    '--document-font-weight': textSizing.bold ? '700' : '400',
+    '--document-font-style': textSizing.italic ? 'italic' : 'normal',
+    '--document-font-decoration': textSizing.underline ? 'underline' : 'none',
+  };
+};
+
+const getPackingSheetPrintStyle = (textSizing) => {
+  return [
+    `--document-font-family: ${textSizing.family}`,
+    `--heading-font-size: ${textSizing.headingFontPt}pt`,
+    `--heading-space: ${textSizing.headingSpacingAfterPt}pt`,
+    `--recipient-font-size: ${textSizing.recipientFontPt}pt`,
+    `--recipient-gap: ${textSizing.recipientGapPt}pt`,
+    `--recipient-line-height: ${textSizing.recipientLineHeight}`,
+    `--document-font-color: ${textSizing.color}`,
+    `--document-font-weight: ${textSizing.bold ? 700 : 400}`,
+    `--document-font-style: ${textSizing.italic ? 'italic' : 'normal'}`,
+    `--document-font-decoration: ${textSizing.underline ? 'underline' : 'none'}`,
+  ].join('; ');
+};
+
+const getDocxRunStyle = (textSizing, sizePt) => ({
+  size: sizePt * 2,
+  font: textSizing.family,
+  color: textSizing.docxColor,
+  bold: textSizing.bold,
+  italics: textSizing.italic,
+  ...(textSizing.underline ? { underline: {} } : {}),
+});
 
 const cleanItemLabel = (label) => {
   return normalizeCell(label)
@@ -513,8 +635,14 @@ function App() {
   const [isDragging, setIsDragging] = useState(false); // Track drag-and-drop state for visual feedback
   const listMode = 'auto'; // Packing sheet type is determined by each item column suffix.
   const [showPreview, setShowPreview] = useState(true); // Whether to show the document preview
+  const [fontSettingsOpen, setFontSettingsOpen] = useState(false);
+  const [fontSettings, setFontSettings] = useState(DEFAULT_FONT_SETTINGS);
   const [selectedPackingSheetKeys, setSelectedPackingSheetKeys] = useState({}); // Per item/page output selection
   const [selectedItemKey, setSelectedItemKey] = useState(''); // Single item used by Generate Selected Packing Sheet
+  const previewContainerRef = useRef(null);
+  const previewPageRefs = useRef({});
+  const previewScrollLockRef = useRef(false);
+  const previewScrollLockTimeoutRef = useRef(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -543,6 +671,14 @@ function App() {
 
     return () => {
       isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (previewScrollLockTimeoutRef.current) {
+        clearTimeout(previewScrollLockTimeoutRef.current);
+      }
     };
   }, []);
 
@@ -589,6 +725,17 @@ function App() {
     handleFilesUpload(e.target.files);
   };
 
+  const updateFontSetting = (key, value) => {
+    setFontSettings(prev => normalizeFontSettings({
+      ...prev,
+      [key]: value,
+    }));
+  };
+
+  const resetFontSettings = () => {
+    setFontSettings(DEFAULT_FONT_SETTINGS);
+  };
+
   /** Handler when drag enters the drop zone */
   const handleDragEnter = (e) => {
     e.preventDefault();
@@ -627,51 +774,124 @@ function App() {
    * @returns {Blob} Word document as a blob
    */
   const createPackingSheetDocument = async (packingSheet) => {
-    const heading = getPackingSheetHeading(packingSheet);
+    const textSizing = getPackingSheetTextSizing(fontSettings);
+    const recipientRunStyle = getDocxRunStyle(textSizing, textSizing.recipientFontPt);
+    const headingRunStyle = getDocxRunStyle(textSizing, textSizing.headingFontPt);
+    const statusRunStyle = {
+      ...headingRunStyle,
+      color: getDocxColor(getPackingSheetStatusColor(packingSheet)),
+    };
+    const columnHeaderRunStyle = { ...recipientRunStyle, bold: true };
     const recipientParagraphs = packingSheet.recipients.length > 0
       ? packingSheet.recipients.map(recipient => new Paragraph({
+        wordWrap: false,
+        tabStops: [
+          {
+            type: TabStopType.LEFT,
+            position: RECIPIENT_ADDRESS_TAB_TWIPS,
+          },
+        ],
         children: [
           new TextRun({
-            text: recipient.address,
-            size: 24,
+            text: getHouseholdSizeValue(recipient.householdSize),
+            ...recipientRunStyle,
           }),
           new TextRun({
-            text: `    ${getHouseholdSizeText(recipient.householdSize)}`,
-            size: 24,
+            text: '\t',
+            ...recipientRunStyle,
+          }),
+          new TextRun({
+            text: recipient.address,
+            ...recipientRunStyle,
           }),
         ],
         spacing: {
-          after: 120,
+          line: textSizing.docxLineSpacing,
+          lineRule: 'auto',
+          after: textSizing.recipientSpacingAfterPt * 20,
         },
       }))
       : [
         new Paragraph({
+          wordWrap: false,
           children: [
             new TextRun({
               text: 'No addresses marked for this item.',
               italics: true,
-              size: 24,
+              ...recipientRunStyle,
             }),
           ],
+          spacing: {
+            line: textSizing.docxLineSpacing,
+            lineRule: 'auto',
+          },
         }),
       ];
 
     const doc = new Document({
       sections: [
         {
-          properties: {},
+          properties: {
+            page: {
+              margin: {
+                top: PACKING_SHEET_MARGIN_TWIPS,
+                right: PACKING_SHEET_MARGIN_TWIPS,
+                bottom: PACKING_SHEET_MARGIN_TWIPS,
+                left: PACKING_SHEET_MARGIN_TWIPS,
+              },
+            },
+          },
           children: [
             new Paragraph({
+              wordWrap: false,
               children: [
                 new TextRun({
-                  text: heading,
-                  bold: true,
-                  size: 32, // 16pt font
+                  text: getPackingSheetHeading(packingSheet),
+                  ...headingRunStyle,
                 }),
               ],
               alignment: AlignmentType.CENTER,
               spacing: {
-                after: 320,
+                after: 80,
+              },
+            }),
+            new Paragraph({
+              wordWrap: false,
+              children: [
+                new TextRun({
+                  text: getPackingSheetStatusLine(packingSheet),
+                  ...statusRunStyle,
+                }),
+              ],
+              alignment: AlignmentType.CENTER,
+              spacing: {
+                after: textSizing.headingSpacingAfterPt * 20,
+              },
+            }),
+            new Paragraph({
+              wordWrap: false,
+              tabStops: [
+                {
+                  type: TabStopType.LEFT,
+                  position: RECIPIENT_ADDRESS_TAB_TWIPS,
+                },
+              ],
+              children: [
+                new TextRun({
+                  text: QUANTITY_COLUMN_LABEL,
+                  ...columnHeaderRunStyle,
+                }),
+                new TextRun({
+                  text: '\t',
+                  ...columnHeaderRunStyle,
+                }),
+                new TextRun({
+                  text: 'Address',
+                  ...columnHeaderRunStyle,
+                }),
+              ],
+              spacing: {
+                after: 80,
               },
             }),
             ...recipientParagraphs,
@@ -686,6 +906,7 @@ function App() {
 
   const currentFile = files[selectedFileIndex];
   const packingSheets = getPackingSheets(currentFile, listMode);
+  const packingSheetTextSizing = getPackingSheetTextSizing(fontSettings);
   const getSelectionKey = (packingSheet) => {
     const fileKey = currentFile?.id || currentFile?.originalName || 'current-file';
     return `${fileKey}:${listMode}:${packingSheet.itemKey || packingSheet.itemName}`;
@@ -696,6 +917,7 @@ function App() {
   const selectedItemPackingSheet = packingSheets.find(packingSheet => packingSheet.itemKey === selectedItemKey)
     || packingSheets[0]
     || null;
+  const selectedPreviewItemKey = selectedItemPackingSheet?.itemKey || '';
 
   const setAllPackingSheetsSelected = (selected) => {
     setSelectedPackingSheetKeys(prev => {
@@ -713,6 +935,84 @@ function App() {
       [getSelectionKey(packingSheet)]: selected
     }));
   };
+
+  const lockPreviewScrollSync = () => {
+    previewScrollLockRef.current = true;
+
+    if (previewScrollLockTimeoutRef.current) {
+      clearTimeout(previewScrollLockTimeoutRef.current);
+    }
+
+    previewScrollLockTimeoutRef.current = setTimeout(() => {
+      previewScrollLockRef.current = false;
+      previewScrollLockTimeoutRef.current = null;
+    }, 300);
+  };
+
+  const selectSinglePackingSheet = (itemKey) => {
+    const packingSheet = packingSheets.find(sheet => sheet.itemKey === itemKey);
+    lockPreviewScrollSync();
+    setSelectedItemKey(itemKey);
+
+    if (packingSheet) {
+      setPackingSheetSelected(packingSheet, true);
+    }
+  };
+
+  const syncSelectedItemToPreviewScroll = () => {
+    if (previewScrollLockRef.current) return;
+
+    const container = previewContainerRef.current;
+    if (!container || selectedPackingSheets.length === 0) return;
+
+    const containerBounds = container.getBoundingClientRect();
+    const containerCenter = containerBounds.left + (containerBounds.width / 2);
+    let nearestPackingSheet = null;
+    let nearestDistance = Infinity;
+
+    selectedPackingSheets.forEach(packingSheet => {
+      const page = previewPageRefs.current[packingSheet.itemKey];
+      if (!page) return;
+
+      const pageBounds = page.getBoundingClientRect();
+      const pageCenter = pageBounds.left + (pageBounds.width / 2);
+      const distance = Math.abs(pageCenter - containerCenter);
+
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestPackingSheet = packingSheet;
+      }
+    });
+
+    if (nearestPackingSheet && nearestPackingSheet.itemKey !== selectedItemPackingSheet?.itemKey) {
+      setSelectedItemKey(nearestPackingSheet.itemKey);
+    }
+  };
+
+  useEffect(() => {
+    if (packingSheets.length === 0) {
+      if (selectedItemKey !== '') setSelectedItemKey('');
+      return;
+    }
+
+    if (!packingSheets.some(packingSheet => packingSheet.itemKey === selectedItemKey)) {
+      setSelectedItemKey(packingSheets[0].itemKey);
+    }
+  }, [packingSheets, selectedItemKey]);
+
+  useEffect(() => {
+    if (!showPreview || !selectedPreviewItemKey) return;
+
+    const page = previewPageRefs.current[selectedPreviewItemKey];
+    if (!page) return;
+
+    lockPreviewScrollSync();
+    page.scrollIntoView({
+      behavior: 'auto',
+      block: 'nearest',
+      inline: 'center',
+    });
+  }, [selectedPreviewItemKey, selectedPackingSheetCount, showPreview]);
 
   const generatePackingSheetFiles = async (sheetsToGenerate, fileLabel) => {
     try {
@@ -775,15 +1075,21 @@ function App() {
       return;
     }
 
+    const pageStyle = getPackingSheetPrintStyle(packingSheetTextSizing);
     const pagesHtml = selectedPackingSheets.map(packingSheet => `
-      <section class="page">
+      <section class="page" style="${pageStyle}">
         <h1>${escapeHtml(getPackingSheetHeading(packingSheet))}</h1>
+        <p class="document-status" style="--document-status-color: ${getPackingSheetStatusColor(packingSheet)}">${escapeHtml(getPackingSheetStatusLine(packingSheet))}</p>
+        <div class="recipient-line recipient-header">
+          <span>${QUANTITY_COLUMN_LABEL}</span>
+          <span>Address</span>
+        </div>
         <div class="recipient-list">
           ${packingSheet.recipients.length > 0
             ? packingSheet.recipients.map(recipient => `
               <p class="recipient-line">
+                <span>${escapeHtml(getHouseholdSizeValue(recipient.householdSize))}</span>
                 <span>${escapeHtml(recipient.address)}</span>
-                <span>${escapeHtml(getHouseholdSizeText(recipient.householdSize))}</span>
               </p>
             `).join('')
             : '<p class="recipient-line muted">No addresses marked for this item.</p>'}
@@ -813,34 +1119,59 @@ function App() {
             }
             .page {
               min-height: 100vh;
-              padding: 0.5in;
+              padding: 0.25in;
               page-break-after: always;
+              font-family: var(--document-font-family, Arial), Helvetica, sans-serif;
+              color: var(--document-font-color, #000);
             }
             .page:last-child {
               page-break-after: auto;
             }
             h1 {
-              margin: 0 0 28px 0;
+              margin: 0 0 4pt 0;
               text-align: center;
-              font-size: 18pt;
+              font-size: var(--heading-font-size, 24pt);
+              line-height: 1.15;
+              font-weight: var(--document-font-weight, 400);
+              font-style: var(--document-font-style, normal);
+              text-decoration: var(--document-font-decoration, none);
+            }
+            .document-status {
+              margin: 0 0 var(--heading-space, 24pt) 0;
+              color: var(--document-status-color, var(--document-font-color, #000));
+              text-align: center;
+              font-size: var(--heading-font-size, 24pt);
+              line-height: 1.15;
+              font-weight: var(--document-font-weight, 400);
+              font-style: var(--document-font-style, normal);
+              text-decoration: var(--document-font-decoration, none);
             }
             .recipient-list {
               display: grid;
-              gap: 10px;
+              gap: var(--recipient-gap, 8pt);
             }
             .recipient-line {
-              display: flex;
-              justify-content: space-between;
-              gap: 24px;
+              display: grid;
+              grid-template-columns: 5.2em minmax(0, 1fr);
+              gap: 18px;
               margin: 0;
-              font-size: 12pt;
+              font-size: var(--recipient-font-size, 16pt);
+              line-height: var(--recipient-line-height, 1.18);
+              white-space: nowrap;
+              font-weight: var(--document-font-weight, 400);
+              font-style: var(--document-font-style, normal);
+              text-decoration: var(--document-font-decoration, none);
+            }
+            .recipient-header {
+              margin-bottom: 6pt;
+              font-weight: 700;
             }
             .muted {
               color: #666;
               font-style: italic;
             }
             @page {
-              margin: 0.5in;
+              margin: 0.25in;
             }
           </style>
         </head>
@@ -964,6 +1295,101 @@ function App() {
                     <span>Show document preview</span>
                   </label>
                 </div>
+                <div className={`font-settings ${fontSettingsOpen ? 'open' : ''}`}>
+                  <div className="font-settings-header">
+                    <span>Font</span>
+                    <button
+                      type="button"
+                      className="settings-icon-btn"
+                      aria-label="Font settings"
+                      title="Font settings"
+                      onClick={() => setFontSettingsOpen(prev => !prev)}
+                    >
+                      <span aria-hidden="true">&#9881;</span>
+                    </button>
+                  </div>
+                  {fontSettingsOpen && (
+                    <div className="font-settings-panel">
+                      <label className="font-control font-size-control">
+                        <span>Size</span>
+                        <input
+                          type="range"
+                          min="6"
+                          max="24"
+                          step="1"
+                          value={fontSettings.sizePt}
+                          onChange={(e) => updateFontSetting('sizePt', e.target.value)}
+                        />
+                        <input
+                          type="number"
+                          min="6"
+                          max="24"
+                          value={fontSettings.sizePt}
+                          onChange={(e) => updateFontSetting('sizePt', e.target.value)}
+                        />
+                      </label>
+                      <label className="font-control">
+                        <span>Family</span>
+                        <select
+                          value={fontSettings.family}
+                          onChange={(e) => updateFontSetting('family', e.target.value)}
+                        >
+                          {FONT_FAMILIES.map(fontFamily => (
+                            <option key={fontFamily} value={fontFamily}>{fontFamily}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="font-control">
+                        <span>Line spacing</span>
+                        <select
+                          value={fontSettings.lineSpacing}
+                          onChange={(e) => updateFontSetting('lineSpacing', e.target.value)}
+                        >
+                          {LINE_SPACING_OPTIONS.map(option => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <div className="format-controls">
+                        <button
+                          type="button"
+                          className={`format-toggle ${fontSettings.bold ? 'active' : ''}`}
+                          aria-pressed={fontSettings.bold}
+                          onClick={() => updateFontSetting('bold', !fontSettings.bold)}
+                        >
+                          B
+                        </button>
+                        <button
+                          type="button"
+                          className={`format-toggle italic-toggle ${fontSettings.italic ? 'active' : ''}`}
+                          aria-pressed={fontSettings.italic}
+                          onClick={() => updateFontSetting('italic', !fontSettings.italic)}
+                        >
+                          I
+                        </button>
+                        <button
+                          type="button"
+                          className={`format-toggle underline-toggle ${fontSettings.underline ? 'active' : ''}`}
+                          aria-pressed={fontSettings.underline}
+                          onClick={() => updateFontSetting('underline', !fontSettings.underline)}
+                        >
+                          U
+                        </button>
+                        <label className="color-control" title="Font color">
+                          <span>Color</span>
+                          <input
+                            type="color"
+                            value={fontSettings.color}
+                            onChange={(e) => updateFontSetting('color', e.target.value)}
+                          />
+                        </label>
+                      </div>
+                      <button type="button" className="reset-font-btn" onClick={resetFontSettings}>
+                        Reset font
+                      </button>
+                    </div>
+                  )}
+                </div>
                 <div className="item-selection">
                   <div className="item-selection-header">
                     <span>Generate one item</span>
@@ -973,7 +1399,7 @@ function App() {
                     <select
                       id="single-item-select"
                       value={selectedItemPackingSheet?.itemKey || ''}
-                      onChange={(e) => setSelectedItemKey(e.target.value)}
+                      onChange={(e) => selectSinglePackingSheet(e.target.value)}
                     >
                       {packingSheets.map((packingSheet) => (
                         <option key={packingSheet.itemKey} value={packingSheet.itemKey}>
@@ -1019,28 +1445,54 @@ function App() {
               <div className="preview-section">
                 <h3>Packing Sheet Preview - {files[selectedFileIndex].originalName}</h3>
                 {/* Document preview styled like Word */}
-                <div className="document-preview">
+                <div
+                  className="document-preview"
+                  ref={previewContainerRef}
+                  onScroll={syncSelectedItemToPreviewScroll}
+                >
                   {selectedPackingSheets.length > 0 ? (
-                    selectedPackingSheets.map((packingSheet) => (
-                      <div key={packingSheet.itemKey} className="document-page">
-                        <h2 className="document-title">{getPackingSheetHeading(packingSheet)}</h2>
-                        <p className="document-count">
-                          {packingSheet.recipients.length} address{packingSheet.recipients.length === 1 ? '' : 'es'}
-                        </p>
-                        <div className="recipient-list">
-                          {packingSheet.recipients.length > 0 ? (
-                            packingSheet.recipients.map((recipient, recipientIndex) => (
-                              <p key={recipientIndex} className="recipient-line">
-                                <span>{recipient.address}</span>
-                                <span>{getHouseholdSizeText(recipient.householdSize)}</span>
-                              </p>
-                            ))
-                          ) : (
-                            <p className="recipient-line muted">No addresses marked for this item.</p>
-                          )}
+                    selectedPackingSheets.map((packingSheet) => {
+                      const previewStyle = getPackingSheetPreviewStyle(packingSheetTextSizing);
+
+                      return (
+                        <div
+                          key={packingSheet.itemKey}
+                          className="document-page"
+                          style={previewStyle}
+                          ref={(page) => {
+                            if (page) {
+                              previewPageRefs.current[packingSheet.itemKey] = page;
+                            } else {
+                              delete previewPageRefs.current[packingSheet.itemKey];
+                            }
+                          }}
+                        >
+                          <h2 className="document-title">{getPackingSheetHeading(packingSheet)}</h2>
+                          <p
+                            className="document-status"
+                            style={{ '--document-status-color': getPackingSheetStatusColor(packingSheet) }}
+                          >
+                            {getPackingSheetStatusLine(packingSheet)}
+                          </p>
+                          <div className="recipient-line recipient-header">
+                            <span>{QUANTITY_COLUMN_LABEL}</span>
+                            <span>Address</span>
+                          </div>
+                          <div className="recipient-list">
+                            {packingSheet.recipients.length > 0 ? (
+                              packingSheet.recipients.map((recipient, recipientIndex) => (
+                                <p key={recipientIndex} className="recipient-line">
+                                  <span>{getHouseholdSizeValue(recipient.householdSize)}</span>
+                                  <span>{recipient.address}</span>
+                                </p>
+                              ))
+                            ) : (
+                              <p className="recipient-line muted">No addresses marked for this item.</p>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))
+                      );
+                    })
                   ) : (
                     <div className="document-page">
                       <h2 className="document-title">
