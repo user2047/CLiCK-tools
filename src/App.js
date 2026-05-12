@@ -638,7 +638,7 @@ function App() {
   const [fontSettingsOpen, setFontSettingsOpen] = useState(false);
   const [fontSettings, setFontSettings] = useState(DEFAULT_FONT_SETTINGS);
   const [selectedPackingSheetKeys, setSelectedPackingSheetKeys] = useState({}); // Per item/page output selection
-  const [selectedItemKey, setSelectedItemKey] = useState(''); // Single item used by Generate Selected Packing Sheet
+  const [selectedItemKey, setSelectedItemKey] = useState(''); // Current item used by single-sheet actions
   const previewContainerRef = useRef(null);
   const previewPageRefs = useRef({});
   const previewScrollLockRef = useRef(false);
@@ -1041,7 +1041,35 @@ function App() {
     }
   };
 
-  const generateAllPackingSheets = async () => {
+  const downloadCurrentPackingSheet = async () => {
+    if (!currentFile || packingSheets.length === 0) {
+      alert('Please upload a MESA Excel file with address and item columns first!');
+      return;
+    }
+
+    if (!selectedItemPackingSheet) {
+      alert('Please select an item page to download.');
+      return;
+    }
+
+    await generatePackingSheetFiles([selectedItemPackingSheet], 'current');
+  };
+
+  const downloadSelectedPackingSheets = async () => {
+    if (!currentFile || packingSheets.length === 0) {
+      alert('Please upload a MESA Excel file with address and item columns first!');
+      return;
+    }
+
+    if (selectedPackingSheetCount === 0) {
+      alert('Please select at least one item page to download.');
+      return;
+    }
+
+    await generatePackingSheetFiles(selectedPackingSheets, 'selected');
+  };
+
+  const downloadAllPackingSheets = async () => {
     if (!currentFile || packingSheets.length === 0) {
       alert('Please upload a MESA Excel file with address and item columns first!');
       return;
@@ -1050,33 +1078,19 @@ function App() {
     await generatePackingSheetFiles(packingSheets, 'all');
   };
 
-  const generateSelectedPackingSheets = async () => {
+  const printPackingSheets = (sheetsToPrint, emptySelectionMessage) => {
     if (!currentFile || packingSheets.length === 0) {
       alert('Please upload a MESA Excel file with address and item columns first!');
       return;
     }
 
-    if (!selectedItemPackingSheet) {
-      alert('Please select an item page to generate.');
-      return;
-    }
-
-    await generatePackingSheetFiles([selectedItemPackingSheet], 'selected');
-  };
-
-  const printSelectedPackingSheets = () => {
-    if (!currentFile || packingSheets.length === 0) {
-      alert('Please upload a MESA Excel file with address and item columns first!');
-      return;
-    }
-
-    if (selectedPackingSheets.length === 0) {
-      alert('Please select at least one item page to print.');
+    if (sheetsToPrint.length === 0) {
+      alert(emptySelectionMessage);
       return;
     }
 
     const pageStyle = getPackingSheetPrintStyle(packingSheetTextSizing);
-    const pagesHtml = selectedPackingSheets.map(packingSheet => `
+    const pagesHtml = sheetsToPrint.map(packingSheet => `
       <section class="page" style="${pageStyle}">
         <h1>${escapeHtml(getPackingSheetHeading(packingSheet))}</h1>
         <p class="document-status" style="--document-status-color: ${getPackingSheetStatusColor(packingSheet)}">${escapeHtml(getPackingSheetStatusLine(packingSheet))}</p>
@@ -1183,6 +1197,21 @@ function App() {
     setTimeout(() => {
       printWindow.print();
     }, 250);
+  };
+
+  const printCurrentPackingSheet = () => {
+    printPackingSheets(
+      selectedItemPackingSheet ? [selectedItemPackingSheet] : [],
+      'Please select an item page to print.'
+    );
+  };
+
+  const printSelectedPackingSheets = () => {
+    printPackingSheets(selectedPackingSheets, 'Please select at least one item page to print.');
+  };
+
+  const printAllPackingSheets = () => {
+    printPackingSheets(packingSheets, 'Please upload a MESA Excel file with address and item columns first!');
   };
 
   return (
@@ -1509,29 +1538,60 @@ function App() {
           )}
         </div>
 
-        {/* Download Buttons */}
+        {/* Packing sheet actions */}
         <div className="download-buttons-container">
-          <button
-            className="download-btn"
-            onClick={generateAllPackingSheets}
-            disabled={packingSheets.length === 0}
-          >
-            Generate All Packing Sheets ({packingSheets.length})
-          </button>
-          <button
-            className="download-btn download-selected-btn"
-            onClick={generateSelectedPackingSheets}
-            disabled={packingSheets.length === 0 || !selectedItemPackingSheet}
-          >
-            Generate Selected Packing Sheet
-          </button>
-          <button
-            className="download-btn print-btn"
-            onClick={printSelectedPackingSheets}
-            disabled={packingSheets.length === 0 || selectedPackingSheetCount === 0}
-          >
-            Print Selected Packing Sheets ({selectedPackingSheetCount})
-          </button>
+          <div className="packing-action-column">
+            <button
+              type="button"
+              className="download-btn"
+              onClick={downloadCurrentPackingSheet}
+              disabled={packingSheets.length === 0 || !selectedItemPackingSheet}
+            >
+              Download Current Packing Sheet
+            </button>
+            <button
+              type="button"
+              className="download-btn download-selected-btn"
+              onClick={downloadSelectedPackingSheets}
+              disabled={packingSheets.length === 0 || selectedPackingSheetCount === 0}
+            >
+              Download Selected Packing Sheets
+            </button>
+            <button
+              type="button"
+              className="download-btn download-all-btn"
+              onClick={downloadAllPackingSheets}
+              disabled={packingSheets.length === 0}
+            >
+              Download All Packing Sheets
+            </button>
+          </div>
+          <div className="packing-action-column">
+            <button
+              type="button"
+              className="download-btn print-current-btn"
+              onClick={printCurrentPackingSheet}
+              disabled={packingSheets.length === 0 || !selectedItemPackingSheet}
+            >
+              Print Current Packing Sheet
+            </button>
+            <button
+              type="button"
+              className="download-btn print-selected-btn"
+              onClick={printSelectedPackingSheets}
+              disabled={packingSheets.length === 0 || selectedPackingSheetCount === 0}
+            >
+              Print Selected Packing Sheets
+            </button>
+            <button
+              type="button"
+              className="download-btn print-all-btn"
+              onClick={printAllPackingSheets}
+              disabled={packingSheets.length === 0}
+            >
+              Print All Packing Sheets
+            </button>
+          </div>
         </div>
       </div>
     </div>
